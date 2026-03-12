@@ -1,0 +1,17 @@
+package com.revshop.shippingservice.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class ShipperDTO {
+    private Long shipperId;
+    private String name;
+    private String phone;
+    private String email;
+    private String vehicleNumber;
+    private Boolean isAvailable;
+}

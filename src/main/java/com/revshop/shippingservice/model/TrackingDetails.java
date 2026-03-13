@@ -20,6 +20,8 @@ public class TrackingDetails {
     @Column(nullable = false)
     private Long orderId;
 
+    private Long shipperId;
+
     @Column(nullable = false)
     private String status;
 

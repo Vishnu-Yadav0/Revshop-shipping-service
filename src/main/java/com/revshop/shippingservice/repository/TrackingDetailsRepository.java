@@ -6,4 +6,5 @@ import java.util.List;
 
 public interface TrackingDetailsRepository extends JpaRepository<TrackingDetails, Long> {
     List<TrackingDetails> findByOrderId(Long orderId);
+    List<TrackingDetails> findByShipperId(Long shipperId);
 }

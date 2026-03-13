@@ -3,7 +3,6 @@ package com.revshop.shippingservice.controller;
 import com.revshop.shippingservice.dto.ApiResponse;
 import com.revshop.shippingservice.dto.ShipperDTO;
 import com.revshop.shippingservice.model.Shipper;
-import java.util.Optional;
 import com.revshop.shippingservice.service.ShippingService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -43,6 +42,12 @@ public class ShippingController {
                 .orElse(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ApiResponse<>("Invalid credentials", null)));
     }
 
+    @PostMapping("/{shipperId}/assign/{orderId}")
+    public ResponseEntity<ApiResponse<Void>> assignShipper(@PathVariable Long shipperId, @PathVariable Long orderId) {
+        shippingService.assignShipper(shipperId, orderId);
+        return ResponseEntity.ok(new ApiResponse<>("Shipper assigned successfully", null));
+    }
+
     @PatchMapping("/{shipperId}/availability")
     public ResponseEntity<ApiResponse<ShipperDTO>> updateAvailability(
             @PathVariable Long shipperId,
@@ -51,8 +56,24 @@ public class ShippingController {
     }
 
     @GetMapping("/{shipperId}/orders")
-    public ResponseEntity<ApiResponse<List<Long>>> getOrders(@PathVariable Long shipperId) {
+    public ResponseEntity<ApiResponse<List<Object>>> getOrders(@PathVariable Long shipperId) {
         return ResponseEntity.ok(new ApiResponse<>("Orders fetched for shipper", shippingService.getOrdersByShipper(shipperId)));
+    }
+
+    @PatchMapping("/{shipperId}/orders/{orderId}/status")
+    public ResponseEntity<ApiResponse<Void>> updateOrderStatus(
+            @PathVariable Long shipperId,
+            @PathVariable Long orderId,
+            @RequestParam String status) {
+        shippingService.updateOrderStatus(shipperId, orderId, status);
+        return ResponseEntity.ok(new ApiResponse<>("Order status updated successfully", null));
+    }
+
+    @GetMapping("/order/{orderId}")
+    public ResponseEntity<ApiResponse<ShipperDTO>> getShipperByOrder(@PathVariable Long orderId) {
+        return shippingService.getShipperByOrder(orderId)
+                .map(dto -> ResponseEntity.ok(new ApiResponse<>("Shipper fetched", dto)))
+                .orElse(ResponseEntity.notFound().build());
     }
 }
 

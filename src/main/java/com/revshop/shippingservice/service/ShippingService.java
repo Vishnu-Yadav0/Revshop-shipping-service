@@ -1,5 +1,7 @@
 package com.revshop.shippingservice.service;
 
+import com.revshop.shippingservice.dto.ApiResponse;
+
 import com.revshop.shippingservice.dto.ShipperDTO;
 import com.revshop.shippingservice.dto.TrackingDTO;
 import com.revshop.shippingservice.exception.ResourceNotFoundException;
@@ -20,13 +22,16 @@ public class ShippingService {
     private final ShipperRepository shipperRepository;
     private final TrackingDetailsRepository trackingDetailsRepository;
     private final PasswordEncoder passwordEncoder;
+    private final com.revshop.shippingservice.client.SalesServiceClient salesServiceClient;
 
     public ShippingService(ShipperRepository shipperRepository, 
                           TrackingDetailsRepository trackingDetailsRepository,
-                          PasswordEncoder passwordEncoder) {
+                          PasswordEncoder passwordEncoder,
+                          com.revshop.shippingservice.client.SalesServiceClient salesServiceClient) {
         this.shipperRepository = shipperRepository;
         this.trackingDetailsRepository = trackingDetailsRepository;
         this.passwordEncoder = passwordEncoder;
+        this.salesServiceClient = salesServiceClient;
     }
 
     public List<ShipperDTO> getAllShippers() {
@@ -61,9 +66,55 @@ public class ShippingService {
         return convertToDTO(shipperRepository.save(shipper));
     }
 
-    public List<Long> getOrdersByShipper(Long shipperId) {
-        // Placeholder as this requires Sales Service interaction
-        return List.of();
+    public void assignShipper(Long shipperId, Long orderId) {
+        Shipper shipper = shipperRepository.findById(shipperId)
+                .orElseThrow(() -> new ResourceNotFoundException("Shipper not found with id: " + shipperId));
+
+        TrackingDetails tracking = new TrackingDetails();
+        tracking.setOrderId(orderId);
+        tracking.setShipperId(shipperId);
+        tracking.setStatus("PROCESSING");
+        tracking.setDescription("Order assigned to shipper: " + shipper.getName());
+        trackingDetailsRepository.save(tracking);
+
+        // Advance status in Sales Service
+        try {
+            salesServiceClient.updateOrderStatus(orderId, "PROCESSING");
+        } catch (Exception e) {
+            // Log error but continue
+        }
+    }
+
+    public List<Object> getOrdersByShipper(Long shipperId) {
+        return trackingDetailsRepository.findByShipperId(shipperId).stream()
+                .map(TrackingDetails::getOrderId)
+                .distinct()
+                .<Object>map(orderId -> {
+                    try {
+                        ApiResponse<Object> response = salesServiceClient.getOrderById(orderId);
+                        return response != null ? response.getData() : null;
+                    } catch (Exception e) {
+                        return null;
+                    }
+                })
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    public void updateOrderStatus(Long shipperId, Long orderId, String status) {
+        TrackingDetails tracking = new TrackingDetails();
+        tracking.setOrderId(orderId);
+        tracking.setShipperId(shipperId);
+        tracking.setStatus(status);
+        tracking.setDescription("Order status updated to: " + status);
+        trackingDetailsRepository.save(tracking);
+
+        // Sync with Sales Service
+        try {
+            salesServiceClient.updateOrderStatus(orderId, status);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to sync status with Sales Service");
+        }
     }
 
     public TrackingDTO addTrackingDetail(Long orderId, String status, String description) {
@@ -78,6 +129,14 @@ public class ShippingService {
         return trackingDetailsRepository.findByOrderId(orderId).stream()
                 .map(this::convertTrackingToDTO)
                 .toList();
+    }
+
+    public Optional<ShipperDTO> getShipperByOrder(Long orderId) {
+        return trackingDetailsRepository.findByOrderId(orderId).stream()
+                .filter(t -> t.getShipperId() != null)
+                .findFirst()
+                .flatMap(t -> shipperRepository.findById(t.getShipperId()))
+                .map(this::convertToDTO);
     }
 
     private ShipperDTO convertToDTO(Shipper shipper) {

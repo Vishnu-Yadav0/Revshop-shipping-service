@@ -75,5 +75,30 @@ public class ShippingController {
                 .map(dto -> ResponseEntity.ok(new ApiResponse<>("Shipper fetched", dto)))
                 .orElse(ResponseEntity.notFound().build());
     }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<ApiResponse<String>> forgotPassword(@RequestBody java.util.Map<String, String> body) {
+        String email = body.get("email");
+        try {
+            shippingService.generatePasswordResetToken(email);
+            return ResponseEntity.ok(new ApiResponse<>("Password reset link sent to your email.", null));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ApiResponse<>(e.getMessage(), null));
+        }
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<ApiResponse<String>> resetPassword(@RequestBody java.util.Map<String, String> body) {
+        String token = body.get("token");
+        String newPassword = body.get("newPassword");
+        try {
+            shippingService.resetPasswordWithToken(token, newPassword);
+            return ResponseEntity.ok(new ApiResponse<>("Password reset successfully.", null));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ApiResponse<>(e.getMessage(), null));
+        }
+    }
 }
 

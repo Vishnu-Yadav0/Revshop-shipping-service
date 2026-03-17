@@ -1,12 +1,13 @@
 package com.revshop.shippingservice.service;
 
 import com.revshop.shippingservice.dto.ApiResponse;
-
 import com.revshop.shippingservice.dto.ShipperDTO;
 import com.revshop.shippingservice.dto.TrackingDTO;
 import com.revshop.shippingservice.exception.ResourceNotFoundException;
 import com.revshop.shippingservice.model.Shipper;
+import com.revshop.shippingservice.model.ShipperPasswordResetToken;
 import com.revshop.shippingservice.model.TrackingDetails;
+import com.revshop.shippingservice.repository.ShipperPasswordResetTokenRepository;
 import com.revshop.shippingservice.repository.ShipperRepository;
 import com.revshop.shippingservice.repository.TrackingDetailsRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -14,28 +15,39 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @Transactional
 public class ShippingService {
 
     private static final Logger log = LoggerFactory.getLogger(ShippingService.class);
+    private static final String NOTIFICATION_SERVICE_URL = "http://notification-service/api/notifications";
 
     private final ShipperRepository shipperRepository;
     private final TrackingDetailsRepository trackingDetailsRepository;
     private final PasswordEncoder passwordEncoder;
     private final com.revshop.shippingservice.client.SalesServiceClient salesServiceClient;
+    private final ShipperPasswordResetTokenRepository resetTokenRepository;
+    private final RestTemplate restTemplate;
 
-    public ShippingService(ShipperRepository shipperRepository, 
+    public ShippingService(ShipperRepository shipperRepository,
                           TrackingDetailsRepository trackingDetailsRepository,
                           PasswordEncoder passwordEncoder,
-                          com.revshop.shippingservice.client.SalesServiceClient salesServiceClient) {
+                          com.revshop.shippingservice.client.SalesServiceClient salesServiceClient,
+                          ShipperPasswordResetTokenRepository resetTokenRepository,
+                          RestTemplate restTemplate) {
         this.shipperRepository = shipperRepository;
         this.trackingDetailsRepository = trackingDetailsRepository;
         this.passwordEncoder = passwordEncoder;
         this.salesServiceClient = salesServiceClient;
+        this.resetTokenRepository = resetTokenRepository;
+        this.restTemplate = restTemplate;
     }
 
     public List<ShipperDTO> getAllShippers() {
@@ -61,6 +73,48 @@ public class ShippingService {
 
     public void deleteShipper(Long id) {
         shipperRepository.deleteById(id);
+    }
+
+    public void generatePasswordResetToken(String email) {
+        Shipper shipper = shipperRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("No shipper account found for email: " + email));
+
+        // Remove any existing token for this email
+        resetTokenRepository.deleteByEmail(email);
+
+        String token = UUID.randomUUID().toString();
+        ShipperPasswordResetToken resetToken = new ShipperPasswordResetToken();
+        resetToken.setToken(token);
+        resetToken.setEmail(email);
+        resetToken.setExpiryDate(LocalDateTime.now().plusMinutes(30));
+        resetTokenRepository.save(resetToken);
+
+        String resetLink = "http://localhost:4200/shipper-reset-password?token=" + token;
+        try {
+            Map<String, String> request = Map.of("to", email, "resetLink", resetLink);
+            restTemplate.postForEntity(NOTIFICATION_SERVICE_URL + "/email/password-reset", request, Void.class);
+            log.info("Shipper password reset link sent to {}", email);
+        } catch (Exception e) {
+            log.error("Failed to send shipper password reset email to {}: {}", email, e.getMessage());
+            throw new RuntimeException("Failed to send reset email. Please try again later.", e);
+        }
+    }
+
+    public void resetPasswordWithToken(String token, String newPassword) {
+        ShipperPasswordResetToken resetToken = resetTokenRepository.findByToken(token)
+                .orElseThrow(() -> new ResourceNotFoundException("Invalid or expired reset token."));
+
+        if (LocalDateTime.now().isAfter(resetToken.getExpiryDate())) {
+            resetTokenRepository.delete(resetToken);
+            throw new RuntimeException("Reset link has expired. Please request a new one.");
+        }
+
+        Shipper shipper = shipperRepository.findByEmail(resetToken.getEmail())
+                .orElseThrow(() -> new ResourceNotFoundException("Shipper not found."));
+        shipper.setPassword(passwordEncoder.encode(newPassword));
+        shipperRepository.save(shipper);
+        resetTokenRepository.delete(resetToken);
+        log.info("Shipper password reset successfully for {}", resetToken.getEmail());
     }
 
     public ShipperDTO updateAvailability(Long shipperId, Boolean available) {

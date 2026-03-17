@@ -10,6 +10,8 @@ import com.revshop.shippingservice.model.TrackingDetails;
 import com.revshop.shippingservice.repository.ShipperRepository;
 import com.revshop.shippingservice.repository.TrackingDetailsRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
@@ -18,6 +20,8 @@ import java.util.Optional;
 @Service
 @Transactional
 public class ShippingService {
+
+    private static final Logger log = LoggerFactory.getLogger(ShippingService.class);
 
     private final ShipperRepository shipperRepository;
     private final TrackingDetailsRepository trackingDetailsRepository;
@@ -86,14 +90,36 @@ public class ShippingService {
     }
 
     public List<Object> getOrdersByShipper(Long shipperId) {
-        return trackingDetailsRepository.findByShipperId(shipperId).stream()
+        // Collect distinct order IDs assigned to this shipper
+        List<Long> orderIds = trackingDetailsRepository.findByShipperId(shipperId).stream()
                 .map(TrackingDetails::getOrderId)
                 .distinct()
+                .toList();
+
+        return orderIds.stream()
                 .<Object>map(orderId -> {
                     try {
                         ApiResponse<Object> response = salesServiceClient.getOrderById(orderId);
-                        return response != null ? response.getData() : null;
+                        if (response == null || response.getData() == null) return null;
+
+                        // Override 'status' with the latest entry from our local tracking_details table.
+                        // This is always accurate regardless of whether the Sales Service sync worked.
+                        List<TrackingDetails> tracking = trackingDetailsRepository.findByOrderId(orderId);
+                        if (!tracking.isEmpty()) {
+                            tracking.stream()
+                                    .max(java.util.Comparator.comparing(TrackingDetails::getCreatedAt))
+                                    .ifPresent(latest -> {
+                                        try {
+                                            @SuppressWarnings("unchecked")
+                                            java.util.Map<String, Object> orderMap =
+                                                    (java.util.Map<String, Object>) response.getData();
+                                            orderMap.put("status", latest.getStatus());
+                                        } catch (Exception ignored) { }
+                                    });
+                        }
+                        return response.getData();
                     } catch (Exception e) {
+                        log.warn("Could not fetch order {} from Sales Service: {}", orderId, e.getMessage());
                         return null;
                     }
                 })
@@ -109,11 +135,12 @@ public class ShippingService {
         tracking.setDescription("Order status updated to: " + status);
         trackingDetailsRepository.save(tracking);
 
-        // Sync with Sales Service
+        // Sync with Sales Service (non-fatal – tracking is already saved)
         try {
             salesServiceClient.updateOrderStatus(orderId, status);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to sync status with Sales Service");
+            log.error("Failed to sync status '{}' for order {} with Sales Service: {}", status, orderId, e.getMessage(), e);
+            // Do not rethrow – tracking record was already persisted successfully
         }
     }
 

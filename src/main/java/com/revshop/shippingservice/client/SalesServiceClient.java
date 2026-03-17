@@ -5,7 +5,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import com.revshop.shippingservice.dto.ApiResponse;
 
-@FeignClient(name = "sales-service")
+@FeignClient(name = "sales-service", url = "${sales-service.url:http://localhost:8084}")
 public interface SalesServiceClient {
 
     @GetMapping("/api/orders/{orderId}")

@@ -124,9 +124,25 @@ public class ShippingService {
         return convertToDTO(shipperRepository.save(shipper));
     }
 
+    @SuppressWarnings("unchecked")
     public void assignShipper(Long shipperId, Long orderId) {
         Shipper shipper = shipperRepository.findById(shipperId)
                 .orElseThrow(() -> new ResourceNotFoundException("Shipper not found with id: " + shipperId));
+
+        // GUARD: Check if order is already terminal
+        try {
+            ApiResponse<Object> orderRes = salesServiceClient.getOrderById(orderId);
+            if (orderRes != null && orderRes.getData() instanceof java.util.Map) {
+                java.util.Map<String, Object> orderData = (java.util.Map<String, Object>) orderRes.getData();
+                String currentStatus = (String) orderData.get("status");
+                if ("DELIVERED".equalsIgnoreCase(currentStatus) || "CANCELLED".equalsIgnoreCase(currentStatus)) {
+                    throw new RuntimeException("Cannot assign shipper to an order that is already " + currentStatus);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Could not verify order status for assignment: {}", e.getMessage());
+            // Continue if we can't reach sales-service, maybe it's down but we want to store tracking
+        }
 
         TrackingDetails tracking = new TrackingDetails();
         tracking.setOrderId(orderId);
@@ -137,7 +153,7 @@ public class ShippingService {
 
         // Advance status in Sales Service
         try {
-            salesServiceClient.updateOrderStatus(orderId, "PROCESSING");
+            salesServiceClient.updateOrderStatus(orderId, java.util.Map.of("status", "PROCESSING"));
         } catch (Exception e) {
             // Log error but continue
         }
@@ -191,7 +207,7 @@ public class ShippingService {
 
         // Sync with Sales Service (non-fatal – tracking is already saved)
         try {
-            salesServiceClient.updateOrderStatus(orderId, status);
+            salesServiceClient.updateOrderStatus(orderId, java.util.Map.of("status", status));
         } catch (Exception e) {
             log.error("Failed to sync status '{}' for order {} with Sales Service: {}", status, orderId, e.getMessage(), e);
             // Do not rethrow – tracking record was already persisted successfully

@@ -12,5 +12,5 @@ public interface SalesServiceClient {
     ApiResponse<Object> getOrderById(@PathVariable("orderId") Long orderId);
 
     @org.springframework.web.bind.annotation.PutMapping("/api/orders/{orderId}/status")
-    ApiResponse<Object> updateOrderStatus(@PathVariable("orderId") Long orderId, @org.springframework.web.bind.annotation.RequestParam("status") String status);
+    ApiResponse<Object> updateOrderStatus(@PathVariable("orderId") Long orderId, @org.springframework.web.bind.annotation.RequestBody java.util.Map<String, Object> payload);
 }
